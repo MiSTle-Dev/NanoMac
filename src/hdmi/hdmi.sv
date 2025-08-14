@@ -62,16 +62,15 @@ logic vsync;
 // sync polarity
 logic [1:0] invert = 2'b11;
 
-// Classic Mac           start     frame   screen s_start   s_len
-wire [54:0] htiming   = { 11'd0,   11'd704, 11'd512, 11'd14, 11'd3 };  
-wire [54:0] htiming_w = { 11'd0,   11'd704, 11'd640, 11'd14, 11'd3 };  
-wire [39:0] vtiming   = {          10'd370, 10'd342,  10'd0, 10'd4 };
+// Classic Mac            frame   screen s_start   s_len
+wire [43:0] htiming   = { 11'd704, 11'd512, 11'd14, 11'd3 };  
+wire [43:0] htiming_w = { 11'd704, 11'd640, 11'd14, 11'd3 };  
+wire [39:0] vtiming   = { 10'd370, 10'd342,  10'd0, 10'd4 };
 wire [7:0] cea = 8'd17; // CEA is HDMI mode in group 1
    
-wire [102:0]  timing = {  wide?htiming_w:htiming, vtiming, cea };
+wire [91:0]  timing = {  wide?htiming_w:htiming, vtiming, cea };
 
 // demux timing parameters   
-wire [10:0] start_x           = timing[102:92];
 wire [10:0] frame_width       = timing[91:81];
 wire [10:0] screen_width      = timing[80:70];
 wire [10:0] hsync_pulse_start = timing[69:59];
@@ -106,7 +105,7 @@ always_ff @(posedge clk_pixel)
 begin
     if (reset)
     begin
-        cx <= start_x;
+        cx <= 11'd0;
         cy <= 10'd0;    // start_y
     end
     else

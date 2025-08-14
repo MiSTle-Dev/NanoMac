@@ -47,6 +47,7 @@ module macplus
 
         // set the real-world inputs to sane defaults
 	input		       configROMSize,     // 64k or 128K ROM
+	input		       configFastboot,    // disable rom/ram check
 	input [1:0]	       configRAMSize,     // 128k, 512k, 1MB or 4MB
 	input		       configMachineType, // 0 = Plus, 1 = SE
 	input [1:0]	       configFloppyWProt,
@@ -278,6 +279,19 @@ addrController ac0
 	.loadSound(loadSound)
 );
 
+/* fastboot patches the rom check and the ramcheck away */
+wire [15:0] romDataMod =
+	    configFastboot?romDataPatched:
+	    romData;   
+
+wire	    trigger = (cpuAddr == 0);   
+   
+wire [15:0] romDataPatched =
+	    ({ romAddr, 1'b0 } == 18'hd7a)?16'h6022:   // 7000, disable rom checksum test
+	    ({ romAddr, 1'b0 } == 18'hea8)?16'h4e71:   // 6EEC, shorten ram test read
+	    ({ romAddr, 1'b0 } == 18'he90)?16'h4e71:   // 6AF0, shorten ram test write
+	    romData;
+   
 dataController #(SCSI_DEVS) dc0
 (
 	.clk(clk_sys), 
@@ -311,7 +325,7 @@ dataController #(SCSI_DEVS) dc0
 	.memoryDataOut(sdram_din),
         .romSel(!_romOE), 
 	.ramDataIn(sdram_do),
-	.romDataIn(romData),
+	.romDataIn(romDataMod),
 
         // interface to sd card
 	.sdc_img_mounted( sdc_image_mounted ),

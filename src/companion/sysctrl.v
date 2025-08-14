@@ -30,7 +30,9 @@ module sysctrl (
   output	    system_reset,
   output reg	    system_widescreen,
   output reg	    system_serial_ext,
+  output reg	    system_fastboot,
   output reg [1:0]  system_memory,
+  output reg [1:0]  system_volume,
   output reg [1:0]  system_floppy_wprot,
   output reg	    system_hdd_wprot
 );
@@ -215,7 +217,9 @@ always @(posedge clk) begin
       // will very likely override these early
       system_widescreen <= 1'b0;           // normal screen by default      
       system_serial_ext <= 1'b0;           // redirect serial to wifi by default
-      system_memory <= 2'd0;               // 128k TODO: 1M
+      system_memory <= 2'd1;               // 512k
+      system_volume <= 2'd1;               // volume low
+      system_fastboot <= 1'b0;             // normal boot
       system_floppy_wprot <= 2'b11;        // both disks write protected
       system_hdd_wprot <= 1'b1;            // SCSI write protected
    end else begin // if (reset)
@@ -310,12 +314,16 @@ always @(posedge clk) begin
 		   
 		   // Value "Y": Memory 128k(0), 512k(1), 1M(2) or 2M(3)
 		   if(id == "Y") system_memory <= data_in[1:0];
+		   // Value "V": Volume off(0), low(1), mid(2) or high(3)
+		   if(id == "V") system_volume <= data_in[1:0];
 		   // Value "W": Floppy write protect int (0) and ext (1)
 		   if(id == "W") system_floppy_wprot <= data_in[1:0];
 		   // Value "X": Normal(0) or Wide(1) screen
 		   if(id == "X") system_widescreen <= data_in[0];
 		   // Value "S": HDD write protect enabled
 		   if(id == "S") system_hdd_wprot <= data_in[0];
+		   // Value "F": fastboot off(0) or on(1), disables rom and ram checks
+		   if(id == "F") system_fastboot <= data_in[0];
 		   // Value "M": serial modem port redirect to WiFi(0) or external/MIDI(1)
 		   if(id == "M") system_serial_ext <= data_in[0];
                 end

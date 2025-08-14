@@ -7,7 +7,8 @@ module nanomac_tb
    output reg [2:0] phase, 
 
    input [1:0]	    ram_size,
-
+   input	    fastboot,
+   
    output [4:0]	    leds,
    
    // serial output, mainly for diagrom
@@ -155,6 +156,7 @@ macplus macplus (
         .audio(audio),
 
 	.configROMSize(1'b1),       // 64k or 128K ROM
+	.configFastboot(fastboot),  // disable rom/ram check
 	.configRAMSize(ram_size),   // 128k, 512k, 1MB or 4MB
 	.configMachineType(1'b0),   // Plus, SE
 	.configFloppyWProt(2'b00),  // no write protection

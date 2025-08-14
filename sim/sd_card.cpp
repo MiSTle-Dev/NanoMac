@@ -15,7 +15,7 @@
 #include "Vnanomac_tb.h"
 
 const char *file_image[] = {
-  "./MacSTBlast.dsk", // internal floppy
+  "./NanoMacTracker.dsk", // internal floppy
   // "./FloppyWrite.dsk", // internal floppy
   // NULL, // "../disks/system30_minimal_work.dsk", // internal floppy
   NULL, // "../disks/HelloWorld.dsk",            // external floppy

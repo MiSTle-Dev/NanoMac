@@ -21,14 +21,14 @@ extern void sd_handle(float ms, Vnanomac_tb *tb);
 
 #define ROM "plusrom.bin"
 
-#define RAM_SIZE 0    // 0=128k, 1=512k, 2=1MB, 3=4MB
+#define RAM_SIZE 1    // 0=128k, 1=512k, 2=1MB, 3=4MB
 
 #define TICKLEN   (0.5/16000000)
 
 // #define DEBUG_MEM
 
 // times with 128k ram, 512k delays everything by 2.7 seconds
-// #define TRACESTART 0.0
+// #define TRACESTART .8
 // #define TRACESTART 1.9   // kbd model cmd and first iwm access
 // #define TRACESTART 2.2   // checkerboard, kbd  inquiry cmd, first SCSI
 // #define TRACESTART 2.8   // tachometer calibration (until ~ 2.97)
@@ -37,11 +37,12 @@ extern void sd_handle(float ms, Vnanomac_tb *tb);
 // #define TRACESTART 5.1   // Sony write called
 // #define TRACESTART 20.0   // 128k / system 3.0 desktop reached
 
-// #define TRACESTART 10.1
-#define TRACESTART 0.0
+// #define TRACESTART 29.3
+// #define TRACESTART 50
+#define TRACESTART 33.2
 
 #ifdef TRACESTART
-#define TRACEEND     (TRACESTART + 0.2)
+#define TRACEEND     (TRACESTART + 0.5)
 #endif
 
 // floppy disk lba to side/track/sector translation table
@@ -345,12 +346,6 @@ void load_rom(void) {
   if(len != 128) { printf("read failed\n"); exit(-1); }
   fclose(fd);
 
-#if 0
-  // we may actually patch some stuff for faster booting
-  rom[0xd7a/2] = SWAP16(0x6022);  // 7000, disable rom checksum test
-  rom[0xea8/2] = SWAP16(0x4e71);  // 6EEC, shorten ram test read
-  rom[0xe90/2] = SWAP16(0x4e71);  // 6AF0, shorten ram test write
-#endif
 }
 
 // "normal" ram, basically sram like
@@ -600,6 +595,7 @@ int main(int argc, char **argv) {
   tb->reset = 1;
   tb->uart_rxd = 1;
   tb->ram_size = RAM_SIZE;
+  tb->fastboot = 1;
   
   /* run for a while */
   while(
