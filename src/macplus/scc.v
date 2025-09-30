@@ -34,13 +34,11 @@ module scc
 	input	rxd,
 	output	txd,
 	input	cts, /* normally wired to device DTR output
-				* on Mac cables. That same line is also
-				* connected to the TRxC input of the SCC
-				* to do fast clocking but we don't do that
-				* here
-				*/
+		      * on Mac cables. That same line is also
+		      * connected to the TRxC input of the SCC
+		      * to do fast clocking  */
 	output	rts, /* on a real mac this activates line
-				* drivers when low */
+		      * drivers when low */
 
 	/* DCD for both ports are hijacked by mouse interface */
 	input	dcd_a, /* We don't synchronize those inputs */
@@ -115,6 +113,7 @@ module scc
 	reg		cts_latch_a;
 	reg		dcd_latch_a;
 	reg		dcd_latch_b;
+	wire		cts_a;
 	wire		cts_ip_a;
 	wire		dcd_ip_a;
 	wire		dcd_ip_b;
@@ -386,13 +385,13 @@ module scc
 	always@(posedge clk or posedge reset_hw) begin
 		if (reset_hw)
 		  wr11_a <= 0;
-		else if (cen && wreg_a && rindex == 12)
+		else if (cen && wreg_a && rindex == 11)
 		  wr11_a <= wdata;
 	end
 	always@(posedge clk or posedge reset_hw) begin
 		if (reset_hw)
 		  wr11_b <= 0;		
-		else if (cen && wreg_b && rindex == 12)
+		else if (cen && wreg_b && rindex == 11)
 		  wr11_b <= wdata;
 	end
 
@@ -509,6 +508,7 @@ module scc
 	/* RR0 */
 	assign rr0_a = { 1'b0, /* Break */
 			 1'b1, /* Tx Underrun/EOM */
+			 /* x_latch_y are delayed by one 8 Mhz cycle through a latch */
 			 wr15_a[5] ? cts_latch_a : cts_a, /* CTS */
 			 1'b0, /* Sync/Hunt */
 			 wr15_a[3] ? dcd_latch_a : dcd_a, /* DCD */
@@ -814,7 +814,7 @@ localparam SYSTEM_CLOCK = 32'd15_600_000;
 localparam SCC_CLOCK    =  32'd3_686_000;
 localparam TRxC_CLOCK   =  32'd1_000_000;
 
-// clock seect TRxC / RTxC
+// clock select TRxC / RTxC
 wire [31:0] target_clock = clk_src_trxc?TRxC_CLOCK:SCC_CLOCK; 
    
 always @(posedge clk) begin
@@ -858,10 +858,13 @@ txuart txuart_a
 	//.i_cts_n(~cts), 
 	.i_cts_n(1'b0), 
 	.o_uart_tx(txd), 
-	.o_busy(tx_busy_a)); // TODO -- do we need this busy line?? probably 
+	.o_busy(tx_busy_a));
 
-wire cts_a = ~tx_busy_a;
-	
+assign cts_a = ~tx_busy_a;
+
+// when doing MIDI cts_a is actually fed with the external 1MHz clock 
+// assign cts_a = clk_en;   
+
 // RTS and CTS are active low
 assign rts = rx_wr_a_latch;
 assign wreq=1;

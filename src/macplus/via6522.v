@@ -61,7 +61,6 @@ reg [7:0] ddrb;
 wire [15:0] latch_reset_pattern = 16'h5550;
 wire [7:0]  last_data = 8'h55;
     
-//    signal pio_i         : pio_t;
 reg [7:0] port_a_c = 8'h00;
 reg [7:0] port_b_c = 8'h00;
 
