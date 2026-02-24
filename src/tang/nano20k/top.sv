@@ -34,7 +34,7 @@ module top(
   output [3:0]	O_sdram_dqm, // 32/4
 
   // generic IO, used for mouse/joystick/...
-  input [7:0]	io,
+  inout [7:0]	io,
 
   // interface to external BL616/M0S
   inout [4:0]	m0s,
@@ -213,7 +213,7 @@ hid hid (
 
         // input local db9 port events to be sent to MCU. Changes also trigger
         // an interrupt, so the MCU doesn't have to poll for joystick events
-        .db9_port( db9_joy ),
+        .db9_port( 6'b000000 ),
         .irq( hid_int ),
         .iack( hid_iack ),
 
@@ -280,22 +280,29 @@ wire [7:0]  sdc_data_read;
 wire [7:0]  sdc_data_write;
 wire        sdc_data_read_en;
 
-//assign sdc_rd[7:4] = 4'b0000;
-//assign sdc_wr[7:4] = 4'b0000;   
-
 wire [31:0] sdc_image_size;
 wire [7:0] sdc_image_mounted;   
+
+`define ORIG
    
 sd_card #(
-    .CLK_DIV(3'd1)                    // for 32 Mhz clock
+    .CLK_DIV(3'd0)                    // for 16 Mhz clock
 ) sd_card (
     .clk(clk_pixel),                  // clock
     .rstn(pll_lock),                  // rstn active-low, 1:working, 0:reset
-  
+
     // SD card signals
+`ifdef ORIG  
     .sdclk(sd_clk),
     .sdcmd(sd_cmd),
     .sddat(sd_dat),
+`else
+	// route sd card to external interface to be able
+    // to access the signals for debugging
+    .sdclk(io[0]),
+    .sdcmd(io[1]),
+    .sddat(io[5:2]),
+`endif
     
     // mcu interface
     .data_strobe(mcu_sdc_strobe),
