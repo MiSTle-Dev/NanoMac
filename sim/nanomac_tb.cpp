@@ -3,12 +3,12 @@
 
   NanoMac verilator environment.
 */
-  
+
 #ifdef VIDEO
 #include <SDL.h>
 #include <SDL_image.h>
 #endif
- 
+
 #include "Vnanomac_tb.h"
 #include "verilated.h"
 #include "verilated_fst_c.h"
@@ -17,32 +17,40 @@ static Vnanomac_tb *tb;
 static VerilatedFstC *trace;
 static double simulation_time;
 
+// enable to test direct mapping bypassing the companion if possible
+#define ENABLE_DIRECT_MAP
+// enable to permanently send MCU sector read/write requests,
+// provocing IO collisions
+#define FC_RW_STORM
+
 extern void sd_handle(float ms, Vnanomac_tb *tb);
 
 #define ROM "plusrom.bin"
 
-#define RAM_SIZE 1    // 0=128k, 1=512k, 2=1MB, 3=4MB
+#define RAM_SIZE 2    // 0=128k, 1=512k, 2=1MB, 3=4MB
 
 #define TICKLEN   (0.5/16000000)
 
 // #define DEBUG_MEM
 
 // times with 128k ram, 512k delays everything by 2.7 seconds
-// #define TRACESTART .8
+// #define TRACESTART 0
 // #define TRACESTART 1.9   // kbd model cmd and first iwm access
 // #define TRACESTART 2.2   // checkerboard, kbd  inquiry cmd, first SCSI
 // #define TRACESTART 2.8   // tachometer calibration (until ~ 2.97)
 // #define TRACESTART 3.9   // -"- (until ~ 2.97)
 // #define TRACESTART 4.1   // floppy boot start
 // #define TRACESTART 5.1   // Sony write called
+// #define TRACESTART .45   // MCU read
+// #define TRACESTART 5.6   // First sector write
 // #define TRACESTART 20.0   // 128k / system 3.0 desktop reached
 
 // #define TRACESTART 29.3
 // #define TRACESTART 50
-#define TRACESTART 33.2
+// #define TRACESTART 33.2
 
 #ifdef TRACESTART
-#define TRACEEND     (TRACESTART + 0.5)
+#define TRACEEND     (TRACESTART + 0.1)
 #endif
 
 // floppy disk lba to side/track/sector translation table
@@ -354,6 +362,163 @@ unsigned short ram[4*512*1024];  // 4 Megabytes
 // the sdram
 uint32_t sdram[2*1024*1024];  // 2M 32 bit words
 
+extern void sd_setup_fake_sector(uint16_t sector, uint8_t *data, uint8_t mask);
+
+static int mcu_read_handler(int index) {
+  static uint32_t sector;
+  static int cnt = -1;
+  static uint8_t buf[512];
+  
+  // printf("%.3fms MCU read handler(%d), %02x\n", simulation_time*1000, index, tb->mcu_data_out);
+  
+  if(!index) {
+    cnt = -1;
+    tb->mcu_data_in = 3;  // MCU read command
+    tb->mcu_data_start = 1;
+
+    sector = random() & 0xffff;
+  }
+  else if(index == 1) tb->mcu_data_in = sector >> 24;
+  else if(index == 2) tb->mcu_data_in = sector >> 16;
+  else if(index == 3) tb->mcu_data_in = sector >> 8;
+  else if(index == 4) tb->mcu_data_in = sector >> 0;
+  if(index < 5) return 0;
+
+  if(cnt<0) {
+    // printf("WAIT flag %02x\n", tb->mcu_data_out);    
+    if(tb->mcu_data_out) return 0;   // still waiting
+    cnt = 0;
+    return 0;
+  }
+  
+  buf[cnt++] = tb->mcu_data_out;
+  if(cnt == 512) {
+    uint8_t ref[512];
+    
+    // compare with original data
+    
+    sd_setup_fake_sector(sector, ref, 0x55);
+    
+    hexdiff(buf, ref, 512);
+
+    assert(!memcmp(buf, ref, 512));
+  }
+    
+  return cnt == 512;   // done
+}
+
+static int mcu_write_handler(int index) {
+  static uint32_t sector;
+  static uint8_t buf[512];
+  static int wait = 0;
+
+  // make sure sectors always follow the same pattern
+  if(!index) {
+    // fake image is 64k sectors
+    sector = random() & 0xffff;
+  }
+  
+  if(index == 0) {
+    tb->mcu_data_in = 5;     // MCU write command
+    tb->mcu_data_start = 1;  //     -"-
+    sd_setup_fake_sector(sector, buf, 0x00);
+    wait = 0;
+  }
+  else if(index == 1) tb->mcu_data_in = sector >> 24;
+  else if(index == 2) tb->mcu_data_in = sector >> 16;
+  else if(index == 3) tb->mcu_data_in = sector >> 8;
+  else if(index == 4) tb->mcu_data_in = sector >> 0;
+  else if(index >= 5) tb->mcu_data_in = buf[index-5];
+  if(index < 512+5) return 0;
+
+  wait++;
+  if(!tb->mcu_data_out)
+    printf("Write done after %d\n", wait);
+  
+  // core returns 01 as long as the sector has not been written
+  return !tb->mcu_data_out;    
+}
+
+static int mcu_irq_handler(int index) {
+  static uint8_t req;
+  static uint32_t sector;
+  
+  // printf("%.3fms MCU irq handler(%d), %02x\n", simulation_time*1000, index, tb->mcu_data_out);
+
+  if(index == 0) {
+    tb->mcu_data_in = 1;  // get status
+    tb->mcu_data_start = 1;
+  } else if(index == 1)
+    tb->mcu_data_in = 0;
+  else if(index == 2) {
+    req = tb->mcu_data_out;
+    sector = 0;
+  } else if(index <= 6)
+    sector = (sector << 8) | tb->mcu_data_out; 
+
+  if(index == 6) {
+    printf("\033[1;33m%.3fms MCU req %02x, sector %u\033[0m\n", simulation_time*1000, req, sector);
+    // set request in msb to allow sd_card.cpp to distinguish the drives
+    sector |= (req<<24);
+  }
+
+  // send reply from index 6 on
+  if(index == 7) {
+    tb->mcu_data_start = 1;
+    tb->mcu_data_in = 2;
+  } else if(index > 7 && index <= 11) {
+    tb->mcu_data_start = 0;
+    tb->mcu_data_in = (sector >> 24);
+    sector <<= 8;
+  }    
+
+  // monitor until the core reports "not busy"
+  return (index > 11) && !tb->mcu_data_out;
+}
+
+extern void sd_mount(float);
+extern int file_image_len[8];
+
+static int mcu_sdc_insert_handler(int index) {
+  if(index == 0) {
+    printf("\033[1;33m%.3fms MCU sdc insert handler\033[0m\n", simulation_time*1000);
+    sd_mount(simulation_time*1000);
+  }
+
+  // max 3 drives (two floppies, one hdd)
+  int drive = index / 16;
+  int drive_idx = index % 16;
+  if(file_image_len[drive] >= 0) {
+    if(!drive_idx) {
+      tb->mcu_data_in = 4;  // insert disk command
+      tb->mcu_data_start = 1;
+    }
+    else if(drive_idx == 1) tb->mcu_data_in = drive;
+    else if(drive_idx == 2) tb->mcu_data_in = file_image_len[drive] >> 24;
+    else if(drive_idx == 3) tb->mcu_data_in = file_image_len[drive] >> 16;
+    else if(drive_idx == 4) tb->mcu_data_in = file_image_len[drive] >> 8;
+    else if(drive_idx == 5) tb->mcu_data_in = file_image_len[drive] >> 0;
+
+#ifdef ENABLE_DIRECT_MAP
+    else if(drive_idx == 6)
+      tb->mcu_data_strobe = 0;
+    else if(drive_idx == 7) {
+      tb->mcu_data_in = 6;         // direct enable signal
+      tb->mcu_data_start = 1;
+    } else if(drive_idx == 8)
+      tb->mcu_data_in = drive;
+    else if(drive_idx == 9)
+      tb->mcu_data_in = 1<<drive;  // drive maps to sectors
+    else if(drive_idx <= 12)
+      tb->mcu_data_in = 0;
+#endif
+    
+    else tb->mcu_data_strobe = 0;	  
+  }  
+  
+  return index > 48;
+}
+
 // proceed simulation by one tick
 void tick(int c) {
   static uint64_t ticks = 0;
@@ -371,8 +536,80 @@ void tick(int c) {
 
     leds = tb->leds;
   }
-  
+
   if(c /* && !tb->reset */ ) {
+
+    /* ============================= FPGA Companion (sd card part) ====================== */
+#define MS2FC(a) ((long)((a)/(2000*TICKLEN)))
+
+    // FPGA companion
+    static int companion_byte = 0;
+    static int companion_cnt = 0;
+    static int companion_next = MS2FC(10);
+    static int (*handler)(int) = mcu_sdc_insert_handler;
+    
+    // if(!(companion_cnt % 1000)) printf("%d of %d\n", (long)(3/(2*TICKLEN)), companion_cnt);
+
+    // report IRQ
+    static int last_irq = 0;
+    tb->mcu_iack = 0;
+    if(tb->mcu_irq && !last_irq) printf("\033[1;32m%.3fms MCU raised IRQ\033[0m\n", simulation_time*1000);
+    last_irq = tb->mcu_irq;
+
+    if(tb->mcu_data_strobe) tb->mcu_data_strobe = 0;
+    else {
+      // still events in queue and current one being in progress?
+      if(handler && companion_cnt >= companion_next) {	
+	// printf("EV %d %d %d %d\n", companion_event, fc_cmds[companion_event].len, companion_cnt, companion_next);
+
+	tb->mcu_data_in = 0;
+	tb->mcu_data_strobe = 1;
+	tb->mcu_data_start = 0;
+
+	// run handler if present
+	if(handler(companion_byte++)) {
+	  handler = NULL;
+	  companion_byte = 0;
+	  
+	  // check if irq is pending and run its handler then
+	  if(tb->mcu_irq) {
+	    printf("\033[1;32m%.3fms MCU delayed handling IRQ\033[0m\n", simulation_time*1000);
+	    tb->mcu_iack = 1;
+	    handler = mcu_irq_handler;
+	    companion_next = companion_cnt;
+	  }
+	}
+      } else {
+	// no more companion events in the main list or current one not active, yet
+	// then process IRQ request immediately
+	if(tb->mcu_irq) {
+	  printf("\033[1;32m%.3fms MCU immediately handling IRQ\033[0m\n", simulation_time*1000);
+	  tb->mcu_iack = 1;
+	  handler = mcu_irq_handler;
+	  companion_next = companion_cnt;
+	  companion_byte = 0;
+	}
+      }
+    }
+    companion_cnt++;
+
+#ifdef FC_RW_STORM
+    // do random mcu sector read/write accesses
+    if(companion_cnt > MS2FC(20) && !handler && !(random() % 100000)) {
+      // printf("\033[1;33m%.3fms PÖNG!\033[0m\n", simulation_time*1000);
+      if(random() & 1) handler = mcu_read_handler;
+      else             handler = mcu_write_handler;
+      companion_next = companion_cnt;
+      companion_byte = 0;
+    }
+#else
+    if(companion_cnt == MS2FC(100)) {
+      handler = mcu_write_handler;
+      companion_next = companion_cnt;
+      companion_byte = 0;
+    }    
+#endif
+    
     // leave reset after 2 ms of simulation time
     if ( tb->reset && simulation_time > 0.002) {
       printf("%.3fms Out of reset\n", simulation_time*1000);
@@ -553,7 +790,10 @@ int main(int argc, char **argv) {
   simulation_time = 0;
 
   atexit(fexit);
- 
+
+  // assure reproducable results
+  srandom(0x12345678);
+
   // create fdc lba map
   int lba_ds = 0;
   int lba_ss = 0;
@@ -591,7 +831,12 @@ int main(int argc, char **argv) {
   tb = new Vnanomac_tb;
   tb->trace(trace, 99);
   trace->open("nanomac.fst");
-  
+
+  tb->mcu_data_strobe = 0;
+  tb->mcu_data_start = 0;
+  tb->mcu_data_in = 0;
+  tb->mcu_iack = 0;
+
   tb->reset = 1;
   tb->uart_rxd = 1;
   tb->ram_size = RAM_SIZE;

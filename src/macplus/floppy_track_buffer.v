@@ -241,6 +241,8 @@ always @(posedge clk) begin
 	      track_loader_state <= 8'd5;
 	      
 	   end else if(inserted[drive] && track_requested != 8'hff) begin
+	      $display("floppy_track_buffer.v: track requested: %0d", track_requested);
+	   
 	      track_in_buffer <= 8'hff;      // mark buffer contents invalid
 
 	      // latch current track information as it may change during sd card access

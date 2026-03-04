@@ -283,8 +283,6 @@ wire        sdc_data_read_en;
 wire [31:0] sdc_image_size;
 wire [7:0] sdc_image_mounted;   
 
-`define ORIG
-   
 sd_card #(
     .CLK_DIV(3'd0)                    // for 16 Mhz clock
 ) sd_card (
@@ -292,17 +290,9 @@ sd_card #(
     .rstn(pll_lock),                  // rstn active-low, 1:working, 0:reset
 
     // SD card signals
-`ifdef ORIG  
     .sdclk(sd_clk),
     .sdcmd(sd_cmd),
     .sddat(sd_dat),
-`else
-	// route sd card to external interface to be able
-    // to access the signals for debugging
-    .sdclk(io[0]),
-    .sdcmd(io[1]),
-    .sddat(io[5:2]),
-`endif
     
     // mcu interface
     .data_strobe(mcu_sdc_strobe),

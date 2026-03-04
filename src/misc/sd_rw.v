@@ -6,13 +6,6 @@
 //           Support CardType   : SDv1.1 , SDv2  or SDHCv2
 //--------------------------------------------------------------------------------------------------------
 
-// TODO:
-// - generate clk_div  (may be 0)
-// - why is sddat_stat exported?
-// - verify 
-//   - data read on rising clock
-//   - data write on falling
-
 module sd_rw # (
     parameter [2:0] CLK_DIV = 3'd2,
     parameter       SIMULATE = 0
@@ -348,10 +341,16 @@ always @ (posedge clk or negedge rstn)
 	        // data CRC is being written on the falling sd clock
 	        WCRC : if(ena_n) begin
                    outaddr <= 9'd0;
-		   for(i=0;i<4;i=i+1) 
-		     sddatout[i] <= data_crc[i][4'd15 - ridx[3:0]];
+
+		   if(ridx < 2*8)
+		     for(i=0;i<4;i=i+1) 
+		       sddatout[i] <= data_crc[i][4'd15 - ridx[3:0]];
+		   else if(ridx == 2*8)
+		     sddatout <= 4'hf;		   
+		   else // ridx == 2*8+1
+                     sddatoe <= 0;	// stop driving data output
 		   
-                    if(ridx >= 2*8-1) begin
+                    if(ridx >= 2*8+1) begin
                         sddat_stat <= WWAITACK;
                         ridx   <= 0; 
                     end else begin
@@ -361,11 +360,10 @@ always @ (posedge clk or negedge rstn)
 
 	        // wait to read ack on rising sd clock edge
 	        WWAITACK : if(ena_p) begin
-                   sddatoe <= 0;	// stop driving data output
 		   if(sddatin[0] == 0) begin
 		      sddat_stat <= WACK;
                       ridx   <= 0; 
-		   end else if(ridx > 1000000) begin
+		   end else if(ridx > 10000000) begin
 		      sddat_stat <= WERR;   // write timeout
 		      ridx   <= 0; 
 		   end else begin

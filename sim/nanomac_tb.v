@@ -28,10 +28,6 @@ module nanomac_tb
    input	    kbd_strobe,
    input [7:0]	    kbd_data, 
    
-   // interface to sd card
-   input [31:0]	    image_size, // length of image file
-   input [3:0]	    image_mounted, // two floppy drives, two scsi drives
-
    // low level sd card interface
    output	    sdclk,
    output	    sdcmd,
@@ -52,6 +48,13 @@ module nanomac_tb
    output	    sd_ras, // row address select
    output	    sd_cas, // columns address select
 
+   input	    mcu_data_strobe,
+   input	    mcu_data_start,
+   input [7:0]	    mcu_data_in,
+   output [7:0]	    mcu_data_out,
+   output	    mcu_irq,
+   input	    mcu_iack,
+   
    // serial interface
    output	    uart_txd,
    input	    uart_rxd,
@@ -106,15 +109,16 @@ wire [8:0]       sdc_addr;
 wire [7:0]       sdc_data_in;
 wire [7:0]       sdc_data_out;
 
-// TODO: map different "drives" into different areas of the SD card
+// interface to sd card
+wire [31:0]	 image_size;   
+wire [3:0]	 image_mounted;   
    
 // for now only floppy uses this to address up to 1MB
-assign sdc_lba[31:24] = sdc_rd | sdc_wr;
 assign sdc_rd[7:4] = 4'b0000;
 assign sdc_wr[7:4] = 4'b0000;   
-   
-sd_rw #(
-    .CLK_DIV(3'd1),
+
+sd_card #(
+    .CLK_DIV(3'd0),
     .SIMULATE(1'b1)
 ) sd_card (
     .rstn(!reset),                 // rstn active-low, 1:working, 0:reset
@@ -127,10 +131,21 @@ sd_rw #(
     .sddat(sddat),
     .sddat_in(sddat_in),
 
+    // mcu interface
+    .data_strobe(mcu_data_strobe),
+    .data_start(mcu_data_start),
+    .data_in(mcu_data_in),
+    .data_out(mcu_data_out),
+    .irq(mcu_irq),
+    .iack(mcu_iack),
+
+    .image_size(image_size),
+    .image_mounted(image_mounted),
+
     // user read sector command interface (sync with clk)
-    .rstart(|sdc_rd), 
-    .wstart(|sdc_wr), 
-    .sector(sdc_lba),
+    .rstart(sdc_rd), 
+    .wstart(sdc_wr), 
+    .rsector(sdc_lba),
     .rbusy(sdc_busy),
     .rdone(sdc_done),
                  
@@ -174,7 +189,7 @@ macplus macplus (
         // interface to sd card
 	.sdc_image_size( image_size),
 	.sdc_image_mounted( image_mounted ),
-	.sdc_lba     ( sdc_lba[23:0] ),        // upper 8 bist are mapped to command bits
+	.sdc_lba     ( sdc_lba     ),
 	.sdc_rd      ( sdc_rd[3:0] ),
 	.sdc_wr      ( sdc_wr[3:0] ),
 	.sdc_busy    ( sdc_busy    ),

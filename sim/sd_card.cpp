@@ -1,10 +1,10 @@
 /*
   sd_card.cpp
 
-  The simulation does not include the FPGA Companion. There's thus
+  The simulation does only partly include the FPGA Companion. There's thus
   no instance that maps the different floppy/SCSI devices onto the
-  SD card. The simulation thus includes the target device into the
-  upper 8 bits of the LBA and this sd card simulation maps the
+  SD card. The simulation thus includes the target device into
+  fixed offsets inside the sd card and this sd card simulation maps the
   request onto the four images files based on that.
 */
 
@@ -14,16 +14,17 @@
 
 #include "Vnanomac_tb.h"
 
-const char *file_image[] = {
-  "./NanoMacTracker.dsk", // internal floppy
-  // "./FloppyWrite.dsk", // internal floppy
-  // NULL, // "../disks/system30_minimal_work.dsk", // internal floppy
-  NULL, // "../disks/HelloWorld.dsk",            // external floppy
-  NULL, // "./boot_work.vhd",                  // SCSI HDD #1
-  NULL
+const char *file_image[8] = {
+  "../disks/Disk605.dsk",    // internal floppy
+  "../disks/speedometer.dsk",  // external floppy
+  NULL, // "./boot_work.vhd",  // SCSI HDD #1
+  NULL, NULL, NULL, NULL, NULL
 };
   
-// #define WRITE_BACK
+int file_image_len[8] = {-1,-1,-1,-1,-1,-1,-1,-1 };
+
+
+  // #define WRITE_BACK
 
 // disable colorization for easier handling in editors 
 #if 1
@@ -189,15 +190,37 @@ static void update_crc(uint8_t *sector_data) {
 // total cid respose is 136 bits / 17 bytes
 unsigned char cid[17] = "\x3f" "\x02TMS" "A08G" "\x14\x39\x4a\x67" "\xc7\x00\xe4";
 
-static FILE *fd[4] = { NULL, NULL, NULL, NULL };
+static FILE *fd[8] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 
 void fdclose(void) {
-  for(int i=0;i<4;i++) {  
+  for(int i=0;i<8;i++) {  
     if(fd[i]) {
       printf("closing file image %d\n", i);
       fclose(fd[i]);
       fd[i] = NULL;
     }
+  }
+}
+
+void sd_mount(float ms) {
+  for(int drive=0;drive<8;drive++) {  
+    if(file_image[drive])
+      fd[drive] = fopen(file_image[drive], "r+b");
+      
+    if(fd[drive]) {	
+      fseek(fd[drive], 0, SEEK_END);
+      file_image_len[drive] = ftello(fd[drive]);
+      printf("%.3fms DRV %d mounting %s, size = %d\n", ms, drive, file_image[drive], file_image_len[drive]);
+      fseek(fd[drive], 0, SEEK_SET);
+    }
+  }
+}
+
+void sd_setup_fake_sector(uint16_t sector, uint8_t *buf, uint8_t mask) {  
+  // fill buffer with dummy data that is unique for this sector
+  for(int i=0;i<256;i++) {
+    buf[2*i]   = (i & 0xff) ^ (sector>>0) ^ mask;
+    buf[2*i+1] = (i & 0xff) ^ (sector>>8) ^ mask;
   }
 }
 
@@ -217,40 +240,7 @@ void sd_handle(float ms, Vnanomac_tb *tb)  {
   static int last_was_acmd = 0;
   static int write_busy = 0;
   static int read_busy = 0;
-  
-  // ----------------- simulate disk image insertion --------------------------
-  static int insert_counter = 0;
-  static int size;
-  
-  if(insert_counter < 4000) {
-    int drive = insert_counter/1000;
-    int cnt = insert_counter%1000;
 
-    if(insert_counter == 10)
-      atexit(fdclose);
-
-    if(cnt == 300) {
-      if(file_image[drive])
-	fd[drive] = fopen(file_image[drive], "r+b");
-      
-      if(fd[drive]) {	
-	fseek(fd[drive], 0, SEEK_END);
-	size = ftello(fd[drive]);
-	printf("%.3fms DRV %d mounting %s, size = %d\n", ms, drive, file_image[drive], size);
-	fseek(fd[drive], 0, SEEK_SET);
-	tb->image_size = size;
-	tb->sddat_in = 15;	    
-      }
-    }
-    
-    if(fd[drive]) {
-      if( cnt == 350 ) tb->image_mounted = 1<<drive;
-      if( cnt == 351 ) tb->image_mounted = 0;
-    }
-    
-    insert_counter++;
-  }
-      
   // ----------------- simulate sd card itself --------------------------
   if(tb->sdclk != last_sdclk) {
     // rising sd card clock edge
@@ -298,29 +288,42 @@ void sd_handle(float ms, Vnanomac_tb *tb)  {
 
 	    int i = dat_arg >> 24;
 	    int drive = 0;
-	    while(!(i&1)) { drive++; i>>=1; }
+	    if(i) while(!(i&1)) { drive++; i>>=1; }
 	    int lba = dat_arg & 0xffffff;
 
-	    if(fd[drive]) {
-	      uint8_t ref[512];
-
-	      // read original sector for comparison
-	      fseek(fd[drive], 512 * lba, SEEK_SET);
-	      int items = fread(ref, 2, 256, fd[drive]);
-	      if(items != 256) perror("fread()");
-
-	      hexdiff(sector_data, ref, 512);
-	    } else 	    
-	      hexdump(sector_data, 520);
-
+	    if(i) {	    
+	      if(fd[drive]) {
+		uint8_t ref[512];
+		
+		// read original sector for comparison
+		fseek(fd[drive], 512 * lba, SEEK_SET);
+		int items = fread(ref, 2, 256, fd[drive]);
+		if(items != 256) perror("fread()");
+		
+		hexdiff(sector_data, ref, 512);
+	      } else 	    
+		hexdump(sector_data, 520);
+	      
 #ifdef WRITE_BACK
-	    fseek(fd[drive], 512 * lba, SEEK_SET);
-	    if(fwrite(sector_data, 2, 256, fd[drive]) != 256) {
-	      printf("SDC WRITE ERROR\n");
-	      exit(-1);
-	    }	    
-	    fflush(fd[drive]);
+	      fseek(fd[drive], 512 * lba, SEEK_SET);
+	      if(fwrite(sector_data, 2, 256, fd[drive]) != 256) {
+		printf("SDC WRITE ERROR\n");
+		exit(-1);
+	      }	    
+	      fflush(fd[drive]);
 #endif
+	    } else {
+	      // MCU data
+	      printf("MCU wrote %u:\n", lba);
+
+	      // compare this with the generated data
+	      uint8_t ref[512];
+	      sd_setup_fake_sector(lba, ref, 0x00);
+	      hexdiff(sector_data, ref, 512);
+
+	      assert(!memcmp(sector_data, ref, 512));
+	    }
+	      
 	    dat_bits--;
 	  }
 	}
@@ -416,42 +419,55 @@ void sd_handle(float ms, Vnanomac_tb *tb)  {
           case 17: { // read block
 	    int i = arg >> 24;
 	    int drive = 0;
-	    while(!(i&1)) { drive++; i>>=1; }
+	    // i == 0 for MCU request
 	    int lba = arg & 0xffffff;
-
-            printf("%.3fms SDC: Request #%d to read single block %d (%s)\n", ms,
-		   drive, lba, sector_string(drive, lba));
+	    if(i) { while(!(i&1)) { drive++; i>>=1; }
+	      printf("%.3fms SDC: Request drive #%d read single block %d (%s)\n", ms,
+		     drive, lba, sector_string(drive, lba));
+	    } else
+	      printf("%.3fms SDC: Request MCU read single block %d\n", ms, lba);
+	      
             cmd_out = reply(17, 0);    // ok
 
-	    if(fd[drive]) {
-	      // load sector
-	      fseek(fd[drive], 512 * lba, SEEK_SET);
-	      int items = fread(sector_data, 2, 256, fd[drive]);
-	      if(items != 256) perror("fread()");
+	    if(i) {	    
+	      if(fd[drive]) {
+		// load sector
+		fseek(fd[drive], 512 * lba, SEEK_SET);
+		int items = fread(sector_data, 2, 256, fd[drive]);
+		if(items != 256) perror("fread()");
 
-	      hexdump(sector_data, 32);
+		hexdump(sector_data, 32);
+	      } else {
+		printf("%.3fms SDC: No image loaded, sending empty data\n", ms);
+		memset(sector_data, 0, 512);
+	      }
 	    } else {
-	      printf("%.3fms SDC: No image loaded, sending empty data\n", ms);
-	      memset(sector_data, 0, 512);
+	      // MCU read
+	      printf("%.3fms SDC: Fake MCU read data\n", ms);
+	      sd_setup_fake_sector(lba, sector_data, 0x55);  
 	    }
-
+	      
 	    update_crc(sector_data);
-            dat_ptr = sector_data;
-            dat_write = 0;
-            dat_bits = 128*8 + 16 + 1 + 1;
-
+	    dat_ptr = sector_data;
+	    dat_write = 0;
+	    dat_bits = 128*8 + 16 + 1 + 1;
+	      
 	    read_busy = READ_BUSY_COUNT;  // some delay to simulate card actually doing some read
 	  } break;
             
           case 24: {  // write block
 	    int i = arg >> 24;
 	    int drive = 0;
-	    while(!(i&1)) { drive++; i>>=1; }
-
-            printf("%.3fms SDC: Request #%d to write single block %ld (%s)\n", ms,
-		   drive, arg&0xffffff, sector_string(drive, arg&0xffffff));
-            cmd_out = reply(24, 0);    // ok
+	    // i == 0 for MCU request
+	    int lba = arg & 0xffffff;
+	    if(i) { while(!(i&1)) { drive++; i>>=1; }
+	      printf("%.3fms SDC: Request drive #%d write single block %d (%s)\n", ms,
+		     drive, lba, sector_string(drive, lba));
+	    } else
+	      printf("%.3fms SDC: Request MCU write single block %d\n", ms, lba);
 	    
+            cmd_out = reply(24, 0);    // ok
+
 	    // prepare to receive data
 	    dat_arg = arg;
             dat_ptr = sector_data;
