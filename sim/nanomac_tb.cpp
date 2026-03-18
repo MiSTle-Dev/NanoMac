@@ -13,23 +13,15 @@
 #include "verilated.h"
 #include "verilated_fst_c.h"
 
-static Vnanomac_tb *tb;
+#include "sd_card_config.h"
+
+Vnanomac_tb *tb;
 static VerilatedFstC *trace;
-static double simulation_time;
-
-// enable to test direct mapping bypassing the companion if possible
-#define ENABLE_DIRECT_MAP
-// enable to permanently send MCU sector read/write requests,
-// provocing IO collisions
-#define FC_RW_STORM
-
-extern void sd_handle(float ms, Vnanomac_tb *tb);
+double simulation_time;
 
 #define ROM "plusrom.bin"
 
 #define RAM_SIZE 2    // 0=128k, 1=512k, 2=1MB, 3=4MB
-
-#define TICKLEN   (0.5/16000000)
 
 // #define DEBUG_MEM
 
@@ -280,60 +272,6 @@ void capture_video(void) {
   }
 }
 #endif
-
-void hexdump(void *data, int size) {
-  int i, b2c;
-  int n=0;
-  char *ptr = (char*)data;
-
-  if(!size) return;
-
-  while(size>0) {
-    printf("%04x: ", n);
-
-    b2c = (size>16)?16:size;
-    for(i=0;i<b2c;i++)      printf("%02x ", 0xff&ptr[i]);
-    printf("  ");
-    for(i=0;i<(16-b2c);i++) printf("   ");
-    for(i=0;i<b2c;i++)      printf("%c", isprint(ptr[i])?ptr[i]:'.');
-    printf("\n");
-
-    ptr  += b2c;
-    size -= b2c;
-    n    += b2c;
-  }
-}
-
-void hexdiff(void *data, void *cmp, int size) {
-  int i, b2c;
-  int n=0;
-  char *ptr = (char*)data;
-  char *cptr = (char*)cmp;
-
-  if(!size) return;
-
-  while(size>0) {
-    printf("%04x: ", n);
-
-    b2c = (size>16)?16:size;
-    for(i=0;i<b2c;i++) {
-      if(cptr[i] == ptr[i])      
-	printf("%02x ", 0xff&ptr[i]);
-      else
-      	printf("\033[1;33m%02x\033[0m ", 0xff&ptr[i]);
-    }
-      
-    printf("  ");
-    for(i=0;i<(16-b2c);i++) printf("   ");
-    for(i=0;i<b2c;i++)      printf("%c", isprint(ptr[i])?ptr[i]:'.');
-    printf("\n");
-
-    ptr  += b2c;
-    cptr  += b2c;
-    size -= b2c;
-    n    += b2c;
-  }
-}
 
 static uint64_t GetTickCountMs() {
   struct timespec ts;
@@ -650,7 +588,7 @@ void tick(int c) {
     }
 
     // process sd card signals
-    sd_handle(simulation_time*1000, tb);
+    sd_handle();
     
     // ------------------------------------ simulate sdram -------------------------------------
     int sdram_has_returned_data = 0;
@@ -832,10 +770,7 @@ int main(int argc, char **argv) {
   tb->trace(trace, 99);
   trace->open("nanomac.fst");
 
-  tb->mcu_data_strobe = 0;
-  tb->mcu_data_start = 0;
-  tb->mcu_data_in = 0;
-  tb->mcu_iack = 0;
+  sd_init();
 
   tb->reset = 1;
   tb->uart_rxd = 1;
