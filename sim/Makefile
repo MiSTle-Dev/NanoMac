@@ -6,9 +6,9 @@ PRJ=nanomac
 
 OBJ_DIR=obj_dir
 
-# the original fx68k won't simulate. Thus we use this special version for simulation
-FX68K_DIR=./fx68x_verilator
-FX68K_FILES=fx68k.sv fx68kAlu.sv uaddrPla.sv fx68k_MicroRom.v fx68k_NanoRom.v
+# the original fx68k won't simulate. This is a slightly modified version
+FX68K_DIR=./fx68k
+FX68K_FILES= fx68k.sv fx68kAlu.sv uaddrPla.sv
 
 VERILATOR_DIR=/usr/local/share/verilator/include
 VERILATOR_FILES=verilated.cpp verilated_vcd_c.cpp verilated_threads.cpp
@@ -19,7 +19,7 @@ NANOMAC_DIR=../src/macplus
 TANG_FILES=sdram.v
 TANG_DIR=../src/tang/nano20k
 
-MISC_FILES=sd_rw.v sdcmd_ctrl.v
+MISC_FILES=sd_card.v sd_rw.v sdcmd_ctrl.v
 MISC_DIR=../src/misc
 
 TB=nanomac_tb
@@ -33,8 +33,15 @@ EXTRA_LDFLAGS = `sdl2-config --libs` -lSDL2_image
 all: $(PRJ)
 
 $(PRJ): $(TB).cpp sd_card.cpp ${HDL_FILES} Makefile
-	verilator -O3 -Wno-fatal --no-timing --trace-fst --threads 1 --trace-underscore  -top-module $(PRJ)_tb $(VERILATOR_FLAGS) -cc ${HDL_FILES} --exe $(TB).cpp sd_card.cpp -o ../$(PRJ) -CFLAGS "${EXTRA_CFLAGS}" -LDFLAGS "${EXTRA_LDFLAGS}"
+	verilator -O3 -Wno-fatal -Wno-BLKANDNBLK --no-timing --trace-fst --threads 1 --trace-underscore  -top-module $(PRJ)_tb $(VERILATOR_FLAGS) -cc ${HDL_FILES} --exe $(TB).cpp sd_card.cpp -o ../$(PRJ) -CFLAGS "${EXTRA_CFLAGS}" -LDFLAGS "${EXTRA_LDFLAGS}"
 	make -j -C ${OBJ_DIR} -f V$(PRJ)_tb.mk
+
+$(FX68K_DIR)/%.sv: ../src/fx68k/%.sv
+	rm -rf $(FX68K_DIR)
+	mkdir $(FX68K_DIR)
+	cp -a ../src/fx68k/*.sv $(FX68K_DIR)
+	patch -p1 < fx68k_sim.patch
+	cp ../src/fx68k/*.mem .
 
 $(PRJ).fst: $(PRJ)
 	./$(PRJ)
@@ -44,6 +51,9 @@ run: $(PRJ)
 
 wave: $(PRJ).fst
 	gtkwave $(PRJ).gtkw
+
+log: $(PRJ)
+	stdbuf -oL -eL ./$(PRJ) | tee log.txt
 
 clean:
 	rm -rf obj_dir $(PRJ)

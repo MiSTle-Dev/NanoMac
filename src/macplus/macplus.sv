@@ -223,9 +223,7 @@ fx68k fx68k (
 	.oHALTEDn   ( ),
 	.DTACKn     ( _cpuDTACK ),
 	.VPAn       ( _cpuVPA ),
-`ifndef VERILATOR
 	.HALTn      ( 1'b1 ),
-`endif
 	.BERRn      ( 1'b1 ),
 	.BRn        ( 1'b1 ),
 	.BGACKn     ( 1'b1 ),

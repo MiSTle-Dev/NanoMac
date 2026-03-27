@@ -1,1 +1,0 @@
-verilator --clk clk --cc -Wno-fatal fx68k.sv fx68kAlu.sv uaddrPla.sv fx68k_MicroRom.v fx68k_NanoRom.v --exe sim_main.cpp
